@@ -43,13 +43,13 @@
         }
         .grid-container {
             display: grid;
-            grid-template-columns: repeat(100, 1fr);
+            grid-template-columns: repeat(200, 1fr);
             margin-top: 20px;
             gap: 1px;
         }
         .grid-cell {
-            width: calc(100% / 100);
-            padding-bottom: calc(100% / 100);
+            width: calc(100% / 200);
+            padding-bottom: calc(100% / 200);
             background-color: white; /* Default background color */
             border: 1px solid #ccc;
         }
@@ -76,12 +76,17 @@
             </div>
         {% endfor %}
     </div>
-    <div class="grid-container">
-        {% for color in grid_colors %}
-            <div class="grid-cell" style="background-color: rgb({{ color['rgb'][0] }}, {{ color['rgb'][1] }}, {{ color['rgb'][2] }});" title="RGB: {{ color['rgb'] }} / HSL: {{ color['hsl'] }}">
-                {{ color['position'] }}
-            </div>
-        {% endfor %}
+    <div class="summary">
+        <h3>Summary Statistics</h3>
+        <p>Total Cells: {{ summary.total_cells }}</p>
+        <p>Unique Colors: {{ summary.unique_colors }}</p>
+        <h4>Most Frequent Colors:</h4>
+        <ul>
+            {% for color, frequency in summary.most_frequent_colors %}
+                <li>{{ color }}: {{ frequency }} times</li>
+            {% endfor %}
+        </ul>
     </div>
+    <a href="{{ url_for('download_json', json_path=json_path) }}" download>Download JSON Data</a>
 </body>
 </html>

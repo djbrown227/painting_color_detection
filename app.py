@@ -2,18 +2,25 @@ from flask import Flask, render_template, request, redirect, url_for, send_from_
 from werkzeug.utils import secure_filename
 import os
 import cv2
-import numpy as np
-import webcolors
 import colorsys
+import webcolors
+import json
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
+app.config['ALLOWED_EXTENSIONS'] = {'png', 'jpg', 'jpeg'}
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
 
 def analyze_grid(original_image_path):
     image = cv2.imread(original_image_path)
     
+    # Convert BGR to RGB
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    
     # Convert image to grayscale
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
     
     # Apply Gaussian blur to reduce noise
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
@@ -30,10 +37,12 @@ def analyze_grid(original_image_path):
     
     # Extract color information from contours
     grid_colors = []
-    grid_size = 100  # Size of the grid
+    grid_size = 200  # Size of the grid
     height, width = gray.shape
     cell_height = height // grid_size
     cell_width = width // grid_size
+    
+    color_frequency = {}
     
     for i in range(grid_size):
         for j in range(grid_size):
@@ -55,19 +64,46 @@ def analyze_grid(original_image_path):
             # Get hex color representation
             hex_color = webcolors.rgb_to_hex((r, g, b))
             
+            # Update color frequency
+            if hex_color in color_frequency:
+                color_frequency[hex_color] += 1
+            else:
+                color_frequency[hex_color] = 1
+            
             # Append color information to grid_colors list
             grid_colors.append({
+                'position': (i, j),
                 'rgb': mean_color,
                 'hex': hex_color,
-                'hsl': (int(h * 360), int(s * 100), int(l * 100)),
-                'position': (i, j)  # Add grid position
+                'hsl': (int(h * 360), int(s * 100), int(l * 100))
             })
     
     # Save processed image with contours
     processed_image_path = os.path.join(app.config['UPLOAD_FOLDER'], 'processed_' + os.path.basename(original_image_path))
-    cv2.imwrite(processed_image_path, image_with_contours)
+    cv2.imwrite(processed_image_path, cv2.cvtColor(image_with_contours, cv2.COLOR_RGB2BGR))
     
-    return grid_colors, processed_image_path
+    # Summary statistics
+    unique_colors = len(color_frequency)
+    most_frequent_colors = sorted(color_frequency.items(), key=lambda item: item[1], reverse=True)
+    
+    summary = {
+        'total_cells': grid_size * grid_size,
+        'unique_colors': unique_colors,
+        'most_frequent_colors': most_frequent_colors
+    }
+    
+    # Combine grid color data and summary statistics
+    result_data = {
+        'grid_colors': grid_colors,
+        'summary': summary
+    }
+    
+    # Save result data to a JSON file
+    json_path = os.path.join(app.config['UPLOAD_FOLDER'], 'result_data.json')
+    with open(json_path, 'w') as json_file:
+        json.dump(result_data, json_file, indent=4)
+    
+    return grid_colors, processed_image_path, json_path, result_data
 
 
 @app.route('/', methods=['GET', 'POST'])
@@ -82,18 +118,26 @@ def upload_file():
             filename = secure_filename(file.filename)
             file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             file.save(file_path)
-            grid_colors, processed_image_path = analyze_grid(file_path)
-            return render_template('results.html', original_image=file_path, processed_image=processed_image_path, grid_colors=grid_colors, os=os)  # Passing 'os' to the template
+            grid_colors, processed_image_path, json_path, result_data = analyze_grid(file_path)
+            return render_template('results.html', 
+                                   original_image=file_path, 
+                                   processed_image=processed_image_path, 
+                                   grid_colors=grid_colors, 
+                                   json_path=json_path, 
+                                   summary=result_data['summary'],
+                                   os=os)  # Pass os module to template context
     return render_template('upload.html')
 
 @app.route('/uploads/<filename>')
 def send_uploaded_file(filename):
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
-
-def allowed_file(filename):
-    ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+@app.route('/download_json')
+def download_json():
+    json_path = request.args.get('json_path')
+    if json_path and os.path.exists(json_path):
+        return send_from_directory(app.config['UPLOAD_FOLDER'], os.path.basename(json_path), as_attachment=True)
+    return "JSON file not found", 404
 
 if __name__ == '__main__':
     app.run(debug=True)
